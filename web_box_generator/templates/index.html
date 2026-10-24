@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管件硬模成型 · 模具生成</title>
+<style>
+  :root { --bd:#d9dee5; --bg:#f5f7fa; --pri:#1f6feb; --pri2:#0b4fc0; --ok:#1a7f37; --warn:#9a6700; --err:#b42318; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:#1f2328;
+         font:14px/1.6 "Microsoft YaHei","Segoe UI",system-ui,sans-serif; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 22px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color:#57606a; font-size: 13px; margin-bottom: 18px; }
+  .card { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
+  .card h2 { font-size: 15px; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
+  .card h2 .n { display:inline-flex; width:20px; height:20px; border-radius:50%;
+                background:var(--pri); color:#fff; align-items:center; justify-content:center; font-size:12px; }
+  .drop { border:2px dashed #c3ccd8; border-radius:10px; padding:20px; text-align:center;
+          color:#57606a; cursor:pointer; background:#fbfcfe; }
+  .drop.on { border-color:var(--pri); background:#eef4ff; color:var(--pri); }
+  .row { display:flex; flex-wrap:wrap; gap:12px 18px; align-items:flex-end; }
+  .fld { display:flex; flex-direction:column; gap:4px; }
+  .fld label { font-size:12px; color:#57606a; }
+  input[type=text], input[type=number], select { padding:7px 9px; border:1px solid #c3ccd8;
+        border-radius:7px; font:inherit; background:#fff; min-width:110px; }
+  input[type=text]:focus, input[type=number]:focus, select:focus { outline:2px solid #bcd3ff; border-color:var(--pri); }
+  button { padding:8px 16px; border:0; border-radius:7px; background:var(--pri); color:#fff;
+           font:inherit; cursor:pointer; }
+  button:hover { background:var(--pri2); }
+  button.ghost { background:#eef1f5; color:#1f2328; }
+  button.ghost:hover { background:#e2e7ee; }
+  button:disabled { background:#c3ccd8; cursor:not-allowed; }
+  .hint { color:#57606a; font-size:12px; }
+  .file-info { margin-top:10px; padding:10px 12px; background:#f0f7ff; border:1px solid #cfe3ff;
+               border-radius:8px; font-size:13px; display:none; }
+  .file-info b { color:var(--pri2); }
+  .bar { height:8px; background:#e7ebf0; border-radius:5px; overflow:hidden; margin:12px 0 6px; display:none; }
+  .bar i { display:block; height:100%; width:35%; background:var(--pri);
+           animation: mv 1.1s linear infinite; }
+  @keyframes mv { 0%{margin-left:-35%} 100%{margin-left:100%} }
+  pre.log { background:#0f172a; color:#c9d5e5; border-radius:8px; padding:10px 12px; max-height:230px;
+            overflow:auto; font:12px/1.55 Consolas,monospace; margin:10px 0 0; white-space:pre-wrap; }
+  .files { display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:10px; margin-top:12px; }
+  .f { border:1px solid var(--bd); border-radius:8px; padding:11px 12px; background:#fbfcfe; }
+  .f .t { font-weight:600; margin-bottom:2px; }
+  .f .d { color:#57606a; font-size:12px; margin-bottom:8px; min-height:32px; }
+  .f a { display:inline-block; padding:6px 12px; background:var(--ok); color:#fff; border-radius:6px;
+         text-decoration:none; font-size:13px; }
+  .f a:hover { background:#146c2e; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:6px 16px;
+        font-size:13px; margin-top:10px; }
+  .kv div span { color:#57606a; }
+  .msg { border-radius:8px; padding:9px 12px; margin-top:10px; font-size:13px; }
+  .msg.ok { background:#eafaef; border:1px solid #b7e2c4; color:#12562a; }
+  .msg.warn { background:#fff8e6; border:1px solid #f0dca6; color:#5f4700; }
+  .msg.err { background:#fdeceb; border:1px solid #f5c2c0; color:#7a1c16; }
+  .msg ul { margin:5px 0 0 18px; padding:0; }
+  /* 批量并行 */
+  .tbl { width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }
+  .tbl th { text-align:left; font-weight:500; color:#57606a; font-size:12px;
+            border-bottom:1px solid var(--bd); padding:7px 8px; white-space:nowrap; }
+  .tbl td { border-bottom:1px solid #eef1f5; padding:9px 8px; vertical-align:top; }
+  .tbl tr:last-child td { border-bottom:0; }
+  .tbl .pn { font-weight:600; word-break:break-all; }
+  .tbl .px { color:#57606a; font-size:12px; }
+  .bg { display:inline-block; padding:2px 8px; border-radius:20px; font-size:12px; white-space:nowrap; }
+  .bg.q { background:#eef1f5; color:#57606a; }
+  .bg.r { background:#eef4ff; color:#0b4fc0; }
+  .bg.d { background:#eafaef; color:#12562a; }
+  .bg.f { background:#fdeceb; color:#7a1c16; }
+  .bg.t { background:#fff8e6; color:#5f4700; }
+  .tbl a.dl { display:inline-block; margin:0 5px 5px 0; padding:3px 9px; background:#eef1f5;
+              color:#1f2328; border-radius:6px; text-decoration:none; font-size:12px; }
+  .tbl a.dl:hover { background:#dce4ff; color:var(--pri2); }
+  .tbl details summary { cursor:pointer; color:#57606a; font-size:12px; }
+  .tbl pre.log { max-height:180px; margin-top:6px; }
+  .etxt { color:#7a1c16; font-size:12px; }
+  .bstat { display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; margin-top:10px; font-size:13px; }
+  .bstat b { color:var(--pri2); }
+  #binfo table { margin-top:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>管件硬模成型 · 模具生成</h1>
+  <div class="sub">上传产品数模 → 生成 <b>上模 / 下模 / 芯棒 / 四件套装配体</b> → 直接下载。
+    支持<b>多管件并行批量生成</b>（各件独立进程、互不影响），另支持镜像 / 旋转。</div>
+
+  <!-- 1 上传 -->
+  <div class="card">
+    <h2><span class="n">1</span>上传产品数模</h2>
+    <div class="drop" id="drop">
+      点击选择文件，或把文件拖到这里<br>
+      <span class="hint">支持 .stp / .step / .iges / .igs / .stl（管件长轴沿 X）</span>
+      <input type="file" id="file" accept=".stp,.step,.iges,.igs,.stl" style="display:none">
+    </div>
+    <div class="file-info" id="finfo"></div>
+    <div class="msg err" id="uperr" style="display:none"></div>
+  </div>
+
+  <!-- 2 生成 -->
+  <div class="card">
+    <h2><span class="n">2</span>生成管件模具</h2>
+    <div class="row">
+      <div class="fld">
+        <label>输出前缀（默认 = 管件编号）</label>
+        <input type="text" id="prefix" placeholder="如 24TK_1324-31">
+      </div>
+      <div class="fld">
+        <label>分模面形式</label>
+        <select id="parting">
+          <option value="plane">水平面（默认，最好加工）</option>
+          <option value="silhouette">侧影随形面（曲面，更随形）</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label>水平分模面高度 mm</label>
+        <input type="number" id="pz" step="0.1" placeholder="留空 = 自动推荐">
+      </div>
+      <div class="fld">
+        <label>&nbsp;</label>
+        <button class="ghost" id="btnSuggest">取推荐值</button>
+      </div>
+      <div class="fld">
+        <label>模芯余量 mm（长 宽 高）</label>
+        <input type="text" id="margin" value="20 20 20" style="width:120px">
+      </div>
+      <div class="fld">
+        <label>选项</label>
+        <label class="hint"><input type="checkbox" id="verify"> 做开模/顶出干涉校验（慢几分钟）</label>
+        <label class="hint"><input type="checkbox" id="core" checked> 输出芯棒 + 四件套</label>
+      </div>
+      <div class="fld">
+        <label>&nbsp;</label>
+        <button id="btnGen">开始生成</button>
+      </div>
+    </div>
+    <div class="hint" id="suggestOut" style="margin-top:8px"></div>
+    <div class="bar" id="bar"><i></i></div>
+    <pre class="log" id="log" style="display:none"></pre>
+    <div id="genOut"></div>
+  </div>
+
+  <!-- 3 批量并行 -->
+  <div class="card">
+    <h2><span class="n">3</span>批量生成（多管件并行）</h2>
+    <div class="drop" id="bdrop">
+      一次选多个产品数模，或把多个文件拖到这里<br>
+      <span class="hint">每个管件跑在独立子进程里：互不影响，单件崩溃/超时只损失自己</span>
+    </div>
+    <input type="file" id="bfiles" multiple accept=".stp,.step,.iges,.igs,.stl" style="display:none">
+    <div class="msg err" id="berr" style="display:none"></div>
+    <div class="file-info" id="binfo"></div>
+
+    <div class="row" style="margin-top:12px">
+      <div class="fld">
+        <label>分模面形式（整批共用）</label>
+        <select id="bparting">
+          <option value="plane">水平面（默认）</option>
+          <option value="silhouette">侧影随形面</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label>水平分模面高度 mm</label>
+        <input type="number" id="bpz" step="0.1" placeholder="留空 = 每件自动推荐" style="width:150px">
+      </div>
+      <div class="fld">
+        <label>模芯余量 mm</label>
+        <input type="text" id="bmargin" value="20 20 20" style="width:110px">
+      </div>
+      <div class="fld">
+        <label>并发进程数</label>
+        <select id="bworkers">
+          <option value="" selected>自动</option>
+          <option value="1">1（串行对照）</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="6">6</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label>选项</label>
+        <label class="hint"><input type="checkbox" id="bverify"> 做开模/顶出校验（每件慢几分钟）</label>
+        <label class="hint"><input type="checkbox" id="bcore" checked> 输出芯棒 + 四件套</label>
+      </div>
+      <div class="fld">
+        <label>&nbsp;</label>
+        <button id="btnBatch">开始批量生成</button>
+      </div>
+      <div class="fld">
+        <label>&nbsp;</label>
+        <button class="ghost" id="btnClear">清空列表</button>
+      </div>
+    </div>
+    <div class="bstat" id="bsys"><span class="hint">正在读取本机并发能力…</span></div>
+    <div class="bar" id="bbar"><i></i></div>
+    <div id="bout"></div>
+  </div>
+
+  <!-- 4 镜像旋转 -->
+  <div class="card">
+    <h2><span class="n">4</span>镜像 / 旋转模型</h2>
+    <div class="row">
+      <div class="fld">
+        <label>镜像面</label>
+        <select id="mplane">
+          <option value="">不做镜像</option>
+          <option value="xOy" selected>xOy 面（Z 方向，上下翻）</option>
+          <option value="xOz">xOz 面（Y 方向）</option>
+          <option value="yOz">yOz 面（X 方向，左右翻）</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label>旋转轴</label>
+        <select id="maxis">
+          <option value="">不旋转</option>
+          <option value="x">绕 X 轴</option>
+          <option value="y">绕 Y 轴</option>
+          <option value="z" selected>绕 Z 轴</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label>方向</label>
+        <select id="mdir"><option value="cw">顺时针</option><option value="ccw">逆时针</option></select>
+      </div>
+      <div class="fld">
+        <label>角度 °</label>
+        <input type="number" id="mdeg" value="90" step="1" style="width:90px">
+      </div>
+      <div class="fld">
+        <label>镜像面过质心</label>
+        <select id="mcenter"><option value="1" selected>是</option><option value="0">否（过原点）</option></select>
+      </div>
+      <div class="fld">
+        <label>&nbsp;</label>
+        <button id="btnMirror">生成变换模型</button>
+      </div>
+    </div>
+    <div class="hint">镜像与旋转可同时选（先镜像后旋转）；结果是一个新 STEP，直接下载。</div>
+    <div id="mirOut"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let up = null;          // 上传结果
+
+function msg(box, kind, html) {
+  box.className = 'msg ' + kind;
+  box.innerHTML = html;
+  box.style.display = 'block';
+}
+function fmt(v, d = 1) { return (v === null || v === undefined || isNaN(v)) ? '-' : Number(v).toFixed(d); }
+
+/* ---------------- 上传 ---------------- */
+const drop = $('drop'), fileInput = $('file');
+drop.onclick = () => fileInput.click();
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('on'); };
+drop.ondragleave = () => drop.classList.remove('on');
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('on');
+                       if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files[0]) upload(fileInput.files[0]); };
+
+async function upload(file) {
+  const box = $('uperr'); box.style.display = 'none';
+  $('finfo').style.display = 'none';
+  const old = drop.innerHTML;
+  drop.innerHTML = '正在上传…';
+  try {
+    const fd = new FormData(); fd.append('file', file);
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '上传失败');
+    up = j;
+    $('prefix').placeholder = j.part_number;
+    if (!$('prefix').value) $('prefix').value = j.part_number;
+    const info = $('finfo');
+    info.innerHTML = `已上传：<b>${j.original_name}</b>　${j.size_mb} MB　`
+      + `管件编号：<b>${j.part_number}</b>`
+      + (j.stl_note ? `<div class="hint" style="margin-top:6px">${j.stl_note}</div>` : '');
+    info.style.display = 'block';
+  } catch (e) {
+    msg(box, 'err', '上传失败：' + e.message);
+  } finally {
+    drop.innerHTML = old;
+  }
+}
+
+/* ---------------- 任务轮询 ---------------- */
+async function pollLog(tid, box, bar) {
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1200));
+    const r = await fetch('/api/task_status?id=' + tid);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '任务查询失败');
+    if (j.log && j.log.length) {
+      box.style.display = 'block';
+      box.textContent = j.log.join('\n');
+      box.scrollTop = box.scrollHeight;
+    }
+    if (j.state === 'done' || j.state === 'error') { bar.style.display = 'none'; return j; }
+  }
+}
+
+function parseMargin() {
+  const v = ($('margin').value || '').trim().split(/[\s,]+/).filter(Boolean).map(Number);
+  return (v.length === 3 && v.every(x => !isNaN(x))) ? v : [20, 20, 20];
+}
+
+/* ---------------- 取推荐值 ---------------- */
+$('btnSuggest').onclick = async () => {
+  if (!up) { msg($('uperr'), 'err', '请先上传产品数模'); return; }
+  const b = $('btnSuggest'); b.disabled = true; b.textContent = '计算中…';
+  $('suggestOut').textContent = '';
+  $('log').style.display = 'none'; $('log').textContent = '';
+  try {
+    const r = await fetch('/api/pipe_plane_suggest', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: up.file, margin: parseMargin() })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '失败');
+    $('bar').style.display = 'block';
+    const t = await pollLog(j.task_id, $('log'), $('bar'));
+    if (t.state === 'error') throw new Error(t.error);
+    const s = (t.result || {}).suggest || {};
+    const lo = s.safe_lo, hi = s.safe_hi;
+    const inverted = (s.safe_ok === false) || (lo != null && hi != null && hi < lo - 1e-9);
+    $('suggestOut').innerHTML =
+      `推荐高度 <b>${fmt(s.parting_z_auto, 2)}</b> mm　`
+      + `（安全区间 ${fmt(lo, 2)} ~ ${fmt(hi, 2)} mm，`
+      + (inverted
+          ? '<span style="color:#9a6700">区间颠倒：本件任何单一水平面都会在部分站位留台阶，'
+            + '可改用「侧影随形」分模面</span>'
+          : '区间内任取都安全')
+      + `）　侧影最低 ${fmt(s.silhouette_min, 2)} mm　`
+      + `对应下模 ${fmt(s.lower_height_auto_mm, 2)} + 上模 ${fmt(s.upper_height_auto_mm, 2)} mm　`
+      + (s.parting_z_auto != null
+          ? `<button class="ghost" onclick="useSuggest(${s.parting_z_auto})">填入该高度</button>` : '');
+  } catch (e) {
+    $('suggestOut').innerHTML = `<span style="color:#b42318">取推荐值失败：${e.message}</span>`;
+  } finally { b.disabled = false; b.textContent = '取推荐值'; $('bar').style.display = 'none'; }
+};
+function useSuggest(z) { $('pz').value = Number(z).toFixed(2); }
+
+/* ---------------- 生成模具 ---------------- */
+$('btnGen').onclick = async () => {
+  if (!up) { msg($('uperr'), 'err', '请先上传产品数模'); return; }
+  const b = $('btnGen'); b.disabled = true; b.textContent = '生成中…';
+  $('genOut').innerHTML = ''; $('suggestOut').textContent = '';
+  const bar = $('bar'), log = $('log');
+  bar.style.display = 'block';
+  log.style.display = 'none';
+  log.textContent = '';
+  try {
+    const body = {
+      file: up.file, prefix: $('prefix').value.trim(), margin: parseMargin(),
+      parting_surface: $('parting').value,
+      parting_z: $('pz').value === '' ? null : Number($('pz').value),
+      verify: $('verify').checked, with_core: $('core').checked
+    };
+    const r = await fetch('/api/mold_generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '启动失败');
+    const t = await pollLog(j.task_id, log, bar);
+    if (t.state === 'error') {
+      msg($('genOut'), 'err',
+          '生成失败：' + t.error + '<div class="hint">详见上方日志与 web_box_generator/error.log</div>');
+      return;
+    }
+    renderMold(t.result);
+  } catch (e) {
+    msg($('genOut'), 'err', '生成失败：' + e.message);
+  } finally { b.disabled = false; b.textContent = '开始生成'; bar.style.display = 'none'; }
+};
+
+function renderMold(res) {
+  const s = res.summary || {};
+  let html = `<div class="msg ok">生成完成：前缀 <b>${res.prefix}</b>，用时 <b>${res.elapsed_s}</b> s`
+    + `（分模面：${s.parting_kind === 'plane' ? '水平面' : '侧影随形'}，z = ${fmt(s.parting_z_mm, 2)} mm）`
+    + `<div class="kv">
+        <div><span>产品尺寸：</span>${(s.product_size_mm || []).map(v => fmt(v, 1)).join(' × ')} mm</div>
+        <div><span>上模体积：</span>${fmt(s.upper_volume_mm3 / 1000, 1)} cm³</div>
+        <div><span>下模体积：</span>${fmt(s.lower_volume_mm3 / 1000, 1)} cm³</div>
+        <div><span>芯棒体积：</span>${fmt(s.core_volume_mm3 / 1000, 1)} cm³</div>
+        <div><span>芯棒提取：</span>${s.trim_via === 'trim' ? '截断块法（端口平面）' : (s.trim_via || '-')}</div>
+      </div></div>`;
+  if (res.warnings && res.warnings.length) {
+    html += '<div class="msg warn"><b>提示 / 警告</b><ul>'
+      + res.warnings.map(w => `<li>${w}</li>`).join('') + '</ul></div>';
+  }
+  html += '<div class="files">' + (res.files || []).map(f =>
+    `<div class="f"><div class="t">${f.label}</div><div class="d">${f.note}</div>`
+    + `<a href="${f.url}">下载（${f.size_mb} MB）</a>`
+    + `<div class="hint" style="margin-top:6px">${f.name}</div></div>`).join('') + '</div>';
+  $('genOut').innerHTML = html;
+}
+
+/* ---------------- 批量并行 ---------------- */
+let bparts = [];
+const bdrop = $('bdrop'), bfileInput = $('bfiles');
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+bdrop.onclick = () => bfileInput.click();
+bdrop.ondragover = (e) => { e.preventDefault(); bdrop.classList.add('on'); };
+bdrop.ondragleave = () => bdrop.classList.remove('on');
+bdrop.ondrop = (e) => { e.preventDefault(); bdrop.classList.remove('on'); addBatchFiles(e.dataTransfer.files); };
+bfileInput.onchange = () => addBatchFiles(bfileInput.files);
+
+function parseMarginEl(id, dflt) {
+  const v = ($(id).value || '').trim().split(/[\s,]+/).filter(Boolean).map(Number);
+  return (v.length === 3 && v.every(x => !isNaN(x))) ? v : dflt;
+}
+
+async function addBatchFiles(list) {
+  const pick = Array.from(list || []).filter(f => /\.(stp|step|iges|igs|stl)$/i.test(f.name));
+  const box = $('berr'); box.style.display = 'none';
+  if (!pick.length) { msg(box, 'err', '没有可用数模（.stp / .step / .iges / .igs / .stl）'); return; }
+  const old = bdrop.innerHTML;
+  for (let i = 0; i < pick.length; i++) {
+    const f = pick[i];
+    if (bparts.some(p => p.name === f.name && p.size === f.size)) continue;
+    bdrop.innerHTML = `正在上传 ${i + 1} / ${pick.length}：${esc(f.name)}…`;
+    try {
+      const fd = new FormData(); fd.append('file', f);
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || '上传失败');
+      bparts.push({ file: j.file, name: j.original_name, size: f.size,
+                    prefix: j.part_number, part_number: j.part_number, size_mb: j.size_mb });
+    } catch (e) { msg(box, 'err', `${esc(f.name)} 上传失败：${esc(e.message)}`); }
+  }
+  bdrop.innerHTML = old;
+  renderParts();
+}
+
+function renderParts() {
+  const box = $('binfo');
+  if (!bparts.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  box.innerHTML = '<table class="tbl"><thead><tr><th>管件</th><th>输出前缀（可改）</th>'
+    + '<th>大小</th><th></th></tr></thead><tbody>'
+    + bparts.map((p, i) => `<tr>
+        <td><div class="pn">${esc(p.name)}</div></td>
+        <td><input type="text" class="bpfx" data-i="${i}" value="${esc(p.prefix)}" style="width:160px"></td>
+        <td class="px">${p.size_mb} MB</td>
+        <td><button class="ghost" data-rm="${i}" style="padding:4px 10px">移除</button></td>
+      </tr>`).join('') + '</tbody></table>'
+    + `<div class="hint" style="margin-top:8px">共 ${bparts.length} 件；前缀重复会自动加 _2 后缀，避免输出目录撞车。</div>`;
+  box.querySelectorAll('.bpfx').forEach(el => {
+    el.oninput = () => { bparts[+el.dataset.i].prefix = el.value.trim(); };
+  });
+  box.querySelectorAll('[data-rm]').forEach(el => {
+    el.onclick = () => { bparts.splice(+el.dataset.rm, 1); renderParts(); };
+  });
+}
+
+$('btnClear').onclick = () => { bparts = []; renderParts(); $('bout').innerHTML = ''; $('berr').style.display = 'none'; };
+
+(async function sysinfo() {
+  try {
+    const j = await (await fetch('/api/system_info')).json();
+    const ram = j.available_ram_mb ? (j.available_ram_mb / 1024).toFixed(1) + ' GB' : '-';
+    $('bsys').innerHTML = `<span class="hint">本机：${j.physical_cores} 物理核 / ${j.logical_cpus} 线程，可用内存 ${ram}`
+      + `　→ 4 件自动并发 <b>${j.suggest_workers_4}</b>，8 件 <b>${j.suggest_workers_8}</b>`
+      + `（并发数 = min(任务数, 物理核, 内存预算, 上限 6)，可用环境变量 MOLD_MAX_WORKERS 调整）</span>`;
+  } catch (e) { $('bsys').innerHTML = '<span class="hint">并发能力读取失败（不影响生成）</span>'; }
+})();
+
+function badge(st) {
+  const m = { queued: ['q', '排队'], running: ['r', '运行中'], done: ['d', '完成'],
+              failed: ['f', '失败'], timeout: ['t', '超时'], crashed: ['f', '崩溃'] };
+  const v = m[st] || ['q', st || '未知'];
+  return `<span class="bg ${v[0]}">${v[1]}</span>`;
+}
+
+function renderBatch(j) {
+  const s = j.summary || {}, c = j.counts || {};
+  let head = `<div class="bstat">共 <b>${j.total}</b> 件 · 并发 <b>${j.workers}</b> 进程`
+    + ` · 已用 <b>${j.elapsed_s}</b> s`;
+  if (s.wall_s) head += ` · 墙钟 <b>${s.wall_s}</b> s（逐件累加 ${s.serial_est_s} s，加速 <b>${s.speedup}x</b>）`;
+  head += `　<span class="hint">完成 ${c.done || 0} · 失败 ${(c.failed || 0) + (c.timeout || 0)}`
+    + ` · 运行 ${c.running || 0} · 排队 ${c.queued || 0}</span></div>`;
+  const rows = (j.items || []).map(it => {
+    const files = (it.files || []).map(f =>
+      `<a class="dl" href="${f.url}" title="${esc(f.note || '')}">${esc(f.label)}</a>`).join('');
+    const log = (it.log && it.log.length)
+      ? `<details><summary>日志</summary><pre class="log">${esc(it.log.join('\n'))}</pre></details>` : '';
+    return `<tr>
+      <td><div class="pn">${esc(it.file)}</div><div class="px">${esc(it.prefix)}</div></td>
+      <td>${badge(it.state)}</td>
+      <td>${it.elapsed_s != null ? it.elapsed_s + ' s' : '-'}</td>
+      <td>${files || '<span class="hint">—</span>'}</td>
+      <td>${it.error ? `<div class="etxt">${esc(it.error)}</div>` : ''}${log}</td>
+    </tr>`;
+  }).join('');
+  $('bout').innerHTML = head + '<table class="tbl"><thead><tr><th>管件 / 前缀</th><th>状态</th>'
+    + '<th>用时</th><th>成品下载</th><th>诊断</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+async function pollBatch(bid) {
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1500));
+    const r = await fetch('/api/batch_status?id=' + bid);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '批次查询失败');
+    renderBatch(j);
+    if (j.state !== 'running') return j;
+  }
+}
+
+$('btnBatch').onclick = async () => {
+  const box = $('berr'); box.style.display = 'none';
+  if (!bparts.length) { msg(box, 'err', '请先添加至少一个产品数模'); return; }
+  const b = $('btnBatch'); b.disabled = true; b.textContent = '批量生成中…';
+  $('bout').innerHTML = ''; $('bbar').style.display = 'block';
+  try {
+    const w = $('bworkers').value;
+    const body = {
+      files: bparts.map(p => ({ file: p.file, prefix: p.prefix || p.part_number })),
+      workers: w === '' ? null : Number(w),
+      parting_surface: $('bparting').value,
+      parting_z: $('bpz').value === '' ? null : Number($('bpz').value),
+      margin: parseMarginEl('bmargin', [20, 20, 20]),
+      verify: $('bverify').checked, with_core: $('bcore').checked
+    };
+    const r = await fetch('/api/batch_generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '启动失败');
+    await pollBatch(j.batch_id);
+  } catch (e) {
+    msg($('bout'), 'err', '批量生成失败：' + esc(e.message));
+  } finally {
+    b.disabled = false; b.textContent = '开始批量生成';
+    $('bbar').style.display = 'none';
+  }
+};
+
+/* ---------------- 镜像 / 旋转 ---------------- */
+$('btnMirror').onclick = async () => {
+  if (!up) { msg($('uperr'), 'err', '请先上传产品数模'); return; }
+  const plane = $('mplane').value, axis = $('maxis').value;
+  const box = $('mirOut');
+  if (!plane && !axis) { msg(box, 'err', '镜像和旋转至少要选一个'); return; }
+  const b = $('btnMirror'); b.disabled = true; b.textContent = '生成中…';
+  box.innerHTML = '';
+  try {
+    const r = await fetch('/api/generate_mirror', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file: up.file, mirror: !!plane, plane: plane || 'xOy',
+        center_on_centroid: $('mcenter').value === '1',
+        rotate: !!axis, axis: axis || 'z',
+        degrees: Number($('mdeg').value || 90), direction: $('mdir').value
+      })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '失败');
+    const dims = (j.bbox_size || []).map(v => fmt(v, 1)).join(' × ');
+    msg(box, 'ok', `已生成：<b>${j.name}</b>（${j.size_mb} MB，${j.elapsed_s} s）<br>`
+      + `操作：${j.mirrored ? '镜像 ' + (j.plane_label || '') : ''}`
+      + `${j.rotated ? `　旋转：绕 ${String(j.rotate_axis).toUpperCase()} 轴 ${j.rotate_deg}° ${j.rotate_dir}` : ''}`
+      + `　包围盒：${dims} mm`
+      + `<div style="margin-top:9px"><a href="${j.url}" style="display:inline-block;padding:6px 12px;`
+      + `background:#1a7f37;color:#fff;border-radius:6px;text-decoration:none">下载 STEP</a></div>`);
+  } catch (e) {
+    msg(box, 'err', '失败：' + e.message);
+  } finally { b.disabled = false; b.textContent = '生成变换模型'; }
+};
+</script>
+</body>
+</html>
