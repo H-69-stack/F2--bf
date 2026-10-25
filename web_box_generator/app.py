@@ -646,6 +646,104 @@ def api_download_mirror():
     return send_file(path, as_attachment=True, download_name=name)
 
 
+# --------------------------------------------------------------------------- 倒圆缩小
+SHRINK_DIR = os.path.join(UPLOAD_DIR, "shrink_output")
+os.makedirs(SHRINK_DIR, exist_ok=True)
+
+
+def _parse_dr(value) -> float:
+    """倒圆缩小量 dR（mm），非法值抛 ValueError。"""
+    v = float(value)
+    if not (0.0 < v <= 50.0):
+        raise ValueError("倒圆缩小量必须 >0 且 ≤50 mm")
+    return v
+
+
+@app.route("/api/corner_analyze", methods=["POST"])
+def api_corner_analyze():
+    """只读分析：倒圆位置/半径、截面是否恒定（异步，几十秒）。"""
+    d = request.get_json(silent=True) or {}
+    abs_src = _uploaded_path(d.get("file"))
+    if not abs_src:
+        return jsonify({"error": "请先上传产品数模"}), 400
+    try:
+        dR = _parse_dr(d.get("dR", 2.0))
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": f"倒圆缩小量非法: {exc}"}), 400
+
+    tid = _task_new(f"倒圆分析：{part_number_from_filename(abs_src)}")
+
+    def _work():
+        from corner_shrink import analyze
+
+        t0 = time.time()
+        info = analyze(abs_src)
+        return {"analysis": info, "dR": dR,
+                "elapsed_s": round(time.time() - t0, 1)}
+
+    _task_start(tid, _work)
+    return jsonify({"task_id": tid, "async": True, "state": "running"})
+
+
+@app.route("/api/corner_shrink", methods=["POST"])
+def api_corner_shrink():
+    """倒圆半径缩小 + 截面周长守恒，生成新管件（异步）。"""
+    d = request.get_json(silent=True) or {}
+    abs_src = _uploaded_path(d.get("file"))
+    if not abs_src:
+        return jsonify({"error": "请先上传产品数模"}), 400
+    try:
+        dR = _parse_dr(d.get("dR", 2.0))
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": f"倒圆缩小量非法: {exc}"}), 400
+    prefix = _safe_name(d.get("prefix") or "", "") or part_number_from_filename(abs_src)
+
+    tid = _task_new(f"倒圆缩小：{prefix}")
+
+    def _work():
+        from corner_shrink import shrink
+
+        t0 = time.time()
+        res = shrink(abs_src, dR=dR, output_dir=SHRINK_DIR, prefix=prefix)
+        step = res.get("step_path") or ""
+        rel = os.path.relpath(step, SHRINK_DIR).replace(os.sep, "/") if step else ""
+        name = os.path.basename(step)
+        return {
+            "ok": True,
+            "name": res.get("name"),
+            "file": name,
+            "rel": rel,
+            "url": f"/api/download_shrink?name={rel}",
+            "size_mb": _human_size(step) if step else 0.0,
+            "elapsed_s": round(time.time() - t0, 1),
+            "corner_radii_before_mm": res.get("corner_radii_before_mm"),
+            "corner_radii_after_mm": res.get("corner_radii_after_mm"),
+            "perimeter_before_mm": res.get("perimeter_before_mm"),
+            "perimeter_after_mm": res.get("perimeter_after_mm"),
+            "volume_before_mm3": res.get("volume_before_mm3"),
+            "volume_after_mm3": res.get("volume_after_mm3"),
+            "volume_change_pct": res.get("volume_change_pct"),
+            "scale": res.get("scale"),
+            "bbox": res.get("bbox"),
+        }
+
+    _task_start(tid, _work)
+    return jsonify({"task_id": tid, "async": True, "state": "running"})
+
+
+@app.route("/api/download_shrink")
+def api_download_shrink():
+    """下载倒圆缩小的成果（只允许 SHRINK_DIR 内的相对路径）。"""
+    rel = (request.args.get("name") or "").replace("\\", "/")
+    if not rel:
+        return "文件不存在", 404
+    root = os.path.realpath(SHRINK_DIR)
+    path = os.path.realpath(os.path.join(root, rel))
+    if not path.startswith(root + os.sep) or not os.path.isfile(path):
+        return "文件不存在", 404
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+
+
 # --------------------------------------------------------------------------- 兜底
 @app.errorhandler(Exception)
 def _handle_uncaught(exc):

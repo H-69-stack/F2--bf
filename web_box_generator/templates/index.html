@@ -9,7 +9,36 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:#1f2328;
          font:14px/1.6 "Microsoft YaHei","Segoe UI",system-ui,sans-serif; }
-  .wrap { max-width: 940px; margin: 0 auto; padding: 22px 16px 60px; }
+
+  /* ---------- 布局：左侧固定功能列表 + 右侧内容区 ---------- */
+  .app { display:flex; min-height:100vh; }
+  .side { position:fixed; top:0; left:0; bottom:0; width:212px; background:#fff;
+          border-right:1px solid var(--bd); display:flex; flex-direction:column;
+          overflow-y:auto; z-index:20; }
+  .brand { padding:18px 16px 14px; border-bottom:1px solid #eef1f5; }
+  .brand .bt { font-size:15px; font-weight:700; color:var(--pri2); line-height:1.35; }
+  .brand .bs { font-size:11.5px; color:#57606a; margin-top:2px; }
+  .nav { display:flex; flex-direction:column; padding:10px 0; }
+  .nav-item { display:flex; gap:10px; align-items:flex-start; width:100%; text-align:left;
+              background:#fff; color:#1f2328; border:0; border-left:3px solid transparent;
+              border-radius:0; padding:11px 14px 11px 11px; font:inherit; cursor:pointer; }
+  .nav-item:hover { background:#f5f8ff; }
+  .nav-item.on { background:#eef4ff; border-left-color:var(--pri); }
+  .nav-item .ni-n { flex:0 0 22px; width:22px; height:22px; border-radius:50%; background:#eef1f5;
+                    color:#57606a; display:inline-flex; align-items:center; justify-content:center;
+                    font-size:12px; margin-top:1px; }
+  .nav-item.on .ni-n { background:var(--pri); color:#fff; }
+  .nav-item .ni-b { min-width:0; }
+  .nav-item .ni-t { display:block; font-size:14px; font-weight:600; line-height:1.4; }
+  .nav-item.on .ni-t { color:var(--pri2); }
+  .nav-item .ni-d { display:block; font-size:11.5px; color:#57606a; line-height:1.45; margin-top:1px; }
+  .side-foot { margin-top:auto; padding:12px 16px 16px; border-top:1px solid #eef1f5;
+               font-size:11px; color:#8b949e; line-height:1.5; }
+  .main { flex:1; min-width:0; margin-left:212px; padding:26px 30px 70px; }
+  .page-head { max-width:1000px; }
+  .panel { display:none; max-width:1000px; }
+  .panel.on { display:block; }
+
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color:#57606a; font-size: 13px; margin-bottom: 18px; }
   .card { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
@@ -79,168 +108,272 @@
   .bstat { display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; margin-top:10px; font-size:13px; }
   .bstat b { color:var(--pri2); }
   #binfo table { margin-top:0; }
+
+  /* 窄屏：左侧列表变为顶部横向滚动条 */
+  @media (max-width: 900px) {
+    .app { display:block; }
+    .side { position:sticky; top:0; left:auto; bottom:auto; width:auto; height:auto;
+            flex-direction:row; align-items:stretch; border-right:0;
+            border-bottom:1px solid var(--bd); overflow:visible; }
+    .brand { display:none; }
+    .nav { flex-direction:row; padding:0; width:100%; overflow-x:auto;
+           -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+    .nav-item { flex:0 0 168px; width:168px; border-left:0; border-bottom:3px solid transparent;
+                padding:9px 12px; }
+    .nav-item.on { border-left:0; border-bottom-color:var(--pri); }
+    .side-foot { display:none; }
+    .main { margin-left:0; padding:18px 14px 50px; }
+    .page-head h1 { font-size:18px; }
+    .panel { max-width:none; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>管件硬模成型 · 模具生成</h1>
-  <div class="sub">上传产品数模 → 生成 <b>上模 / 下模 / 芯棒 / 四件套装配体</b> → 直接下载。
-    支持<b>多管件并行批量生成</b>（各件独立进程、互不影响），另支持镜像 / 旋转。</div>
-
-  <!-- 1 上传 -->
-  <div class="card">
-    <h2><span class="n">1</span>上传产品数模</h2>
-    <div class="drop" id="drop">
-      点击选择文件，或把文件拖到这里<br>
-      <span class="hint">支持 .stp / .step / .iges / .igs / .stl（管件长轴沿 X）</span>
-      <input type="file" id="file" accept=".stp,.step,.iges,.igs,.stl" style="display:none">
+<div class="app">
+  <!-- 左侧功能列表 -->
+  <aside class="side">
+    <div class="brand">
+      <div class="bt">管件硬模成型</div>
+      <div class="bs">模具生成系统</div>
     </div>
-    <div class="file-info" id="finfo"></div>
-    <div class="msg err" id="uperr" style="display:none"></div>
-  </div>
+    <nav class="nav">
+      <button class="nav-item on" type="button" data-panel="p-upload">
+        <span class="ni-n">1</span>
+        <span class="ni-b"><span class="ni-t">上传数模</span><span class="ni-d">STEP/IGES/STL</span></span>
+      </button>
+      <button class="nav-item" type="button" data-panel="p-generate">
+        <span class="ni-n">2</span>
+        <span class="ni-b"><span class="ni-t">生成模具</span><span class="ni-d">上模·下模·芯棒·四件套</span></span>
+      </button>
+      <button class="nav-item" type="button" data-panel="p-batch">
+        <span class="ni-n">3</span>
+        <span class="ni-b"><span class="ni-t">批量生成</span><span class="ni-d">多件并行</span></span>
+      </button>
+      <button class="nav-item" type="button" data-panel="p-corner">
+        <span class="ni-n">4</span>
+        <span class="ni-b"><span class="ni-t">倒圆缩小</span><span class="ni-d">倒圆半径 −2mm，周长不变</span></span>
+      </button>
+      <button class="nav-item" type="button" data-panel="p-mirror">
+        <span class="ni-n">5</span>
+        <span class="ni-b"><span class="ni-t">镜像/旋转</span><span class="ni-d">坐标变换</span></span>
+      </button>
+    </nav>
+    <div class="side-foot">纯本地运行<br>各功能独立进程</div>
+  </aside>
 
-  <!-- 2 生成 -->
-  <div class="card">
-    <h2><span class="n">2</span>生成管件模具</h2>
-    <div class="row">
-      <div class="fld">
-        <label>输出前缀（默认 = 管件编号）</label>
-        <input type="text" id="prefix" placeholder="如 24TK_1324-31">
-      </div>
-      <div class="fld">
-        <label>分模面形式</label>
-        <select id="parting">
-          <option value="plane">水平面（默认，最好加工）</option>
-          <option value="silhouette">侧影随形面（曲面，更随形）</option>
-        </select>
-      </div>
-      <div class="fld">
-        <label>水平分模面高度 mm</label>
-        <input type="number" id="pz" step="0.1" placeholder="留空 = 自动推荐">
-      </div>
-      <div class="fld">
-        <label>&nbsp;</label>
-        <button class="ghost" id="btnSuggest">取推荐值</button>
-      </div>
-      <div class="fld">
-        <label>模芯余量 mm（长 宽 高）</label>
-        <input type="text" id="margin" value="20 20 20" style="width:120px">
-      </div>
-      <div class="fld">
-        <label>选项</label>
-        <label class="hint"><input type="checkbox" id="verify"> 做开模/顶出干涉校验（慢几分钟）</label>
-        <label class="hint"><input type="checkbox" id="core" checked> 输出芯棒 + 四件套</label>
-      </div>
-      <div class="fld">
-        <label>&nbsp;</label>
-        <button id="btnGen">开始生成</button>
-      </div>
-    </div>
-    <div class="hint" id="suggestOut" style="margin-top:8px"></div>
-    <div class="bar" id="bar"><i></i></div>
-    <pre class="log" id="log" style="display:none"></pre>
-    <div id="genOut"></div>
-  </div>
+  <!-- 右侧内容区 -->
+  <main class="main">
+    <header class="page-head">
+      <h1>管件硬模成型 · 模具生成</h1>
+      <div class="sub">上传产品数模 → 生成 <b>上模 / 下模 / 芯棒 / 四件套装配体</b> → 直接下载。
+        支持<b>多管件并行批量生成</b>（各件独立进程、互不影响），另支持倒圆缩小、镜像 / 旋转。</div>
+    </header>
 
-  <!-- 3 批量并行 -->
-  <div class="card">
-    <h2><span class="n">3</span>批量生成（多管件并行）</h2>
-    <div class="drop" id="bdrop">
-      一次选多个产品数模，或把多个文件拖到这里<br>
-      <span class="hint">每个管件跑在独立子进程里：互不影响，单件崩溃/超时只损失自己</span>
-    </div>
-    <input type="file" id="bfiles" multiple accept=".stp,.step,.iges,.igs,.stl" style="display:none">
-    <div class="msg err" id="berr" style="display:none"></div>
-    <div class="file-info" id="binfo"></div>
+    <!-- 1 上传 -->
+    <section class="panel on" id="p-upload">
+      <div class="card">
+        <h2><span class="n">1</span>上传产品数模</h2>
+        <div class="drop" id="drop">
+          点击选择文件，或把文件拖到这里<br>
+          <span class="hint">支持 .stp / .step / .iges / .igs / .stl（管件长轴沿 X）</span>
+          <input type="file" id="file" accept=".stp,.step,.iges,.igs,.stl" style="display:none">
+        </div>
+        <div class="file-info" id="finfo"></div>
+        <div class="msg err" id="uperr" style="display:none"></div>
+      </div>
+    </section>
 
-    <div class="row" style="margin-top:12px">
-      <div class="fld">
-        <label>分模面形式（整批共用）</label>
-        <select id="bparting">
-          <option value="plane">水平面（默认）</option>
-          <option value="silhouette">侧影随形面</option>
-        </select>
+    <!-- 2 生成 -->
+    <section class="panel" id="p-generate">
+      <div class="card">
+        <h2><span class="n">2</span>生成管件模具</h2>
+        <div class="row">
+          <div class="fld">
+            <label>输出前缀（默认 = 管件编号）</label>
+            <input type="text" id="prefix" placeholder="如 24TK_1324-31">
+          </div>
+          <div class="fld">
+            <label>分模面形式</label>
+            <select id="parting">
+              <option value="plane">水平面（默认，最好加工）</option>
+              <option value="silhouette">侧影随形面（曲面，更随形）</option>
+            </select>
+          </div>
+          <div class="fld">
+            <label>水平分模面高度 mm</label>
+            <input type="number" id="pz" step="0.1" placeholder="留空 = 自动推荐">
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button class="ghost" id="btnSuggest">取推荐值</button>
+          </div>
+          <div class="fld">
+            <label>模芯余量 mm（长 宽 高）</label>
+            <input type="text" id="margin" value="20 20 20" style="width:120px">
+          </div>
+          <div class="fld">
+            <label>选项</label>
+            <label class="hint"><input type="checkbox" id="verify"> 做开模/顶出干涉校验（慢几分钟）</label>
+            <label class="hint"><input type="checkbox" id="core" checked> 输出芯棒 + 四件套</label>
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button id="btnGen">开始生成</button>
+          </div>
+        </div>
+        <div class="hint" id="suggestOut" style="margin-top:8px"></div>
+        <div class="bar" id="bar"><i></i></div>
+        <pre class="log" id="log" style="display:none"></pre>
+        <div id="genOut"></div>
       </div>
-      <div class="fld">
-        <label>水平分模面高度 mm</label>
-        <input type="number" id="bpz" step="0.1" placeholder="留空 = 每件自动推荐" style="width:150px">
-      </div>
-      <div class="fld">
-        <label>模芯余量 mm</label>
-        <input type="text" id="bmargin" value="20 20 20" style="width:110px">
-      </div>
-      <div class="fld">
-        <label>并发进程数</label>
-        <select id="bworkers">
-          <option value="" selected>自动</option>
-          <option value="1">1（串行对照）</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="6">6</option>
-        </select>
-      </div>
-      <div class="fld">
-        <label>选项</label>
-        <label class="hint"><input type="checkbox" id="bverify"> 做开模/顶出校验（每件慢几分钟）</label>
-        <label class="hint"><input type="checkbox" id="bcore" checked> 输出芯棒 + 四件套</label>
-      </div>
-      <div class="fld">
-        <label>&nbsp;</label>
-        <button id="btnBatch">开始批量生成</button>
-      </div>
-      <div class="fld">
-        <label>&nbsp;</label>
-        <button class="ghost" id="btnClear">清空列表</button>
-      </div>
-    </div>
-    <div class="bstat" id="bsys"><span class="hint">正在读取本机并发能力…</span></div>
-    <div class="bar" id="bbar"><i></i></div>
-    <div id="bout"></div>
-  </div>
+    </section>
 
-  <!-- 4 镜像旋转 -->
-  <div class="card">
-    <h2><span class="n">4</span>镜像 / 旋转模型</h2>
-    <div class="row">
-      <div class="fld">
-        <label>镜像面</label>
-        <select id="mplane">
-          <option value="">不做镜像</option>
-          <option value="xOy" selected>xOy 面（Z 方向，上下翻）</option>
-          <option value="xOz">xOz 面（Y 方向）</option>
-          <option value="yOz">yOz 面（X 方向，左右翻）</option>
-        </select>
+    <!-- 3 批量并行 -->
+    <section class="panel" id="p-batch">
+      <div class="card">
+        <h2><span class="n">3</span>批量生成（多管件并行）</h2>
+        <div class="drop" id="bdrop">
+          一次选多个产品数模，或把多个文件拖到这里<br>
+          <span class="hint">每个管件跑在独立子进程里：互不影响，单件崩溃/超时只损失自己</span>
+        </div>
+        <input type="file" id="bfiles" multiple accept=".stp,.step,.iges,.igs,.stl" style="display:none">
+        <div class="msg err" id="berr" style="display:none"></div>
+        <div class="file-info" id="binfo"></div>
+
+        <div class="row" style="margin-top:12px">
+          <div class="fld">
+            <label>分模面形式（整批共用）</label>
+            <select id="bparting">
+              <option value="plane">水平面（默认）</option>
+              <option value="silhouette">侧影随形面</option>
+            </select>
+          </div>
+          <div class="fld">
+            <label>水平分模面高度 mm</label>
+            <input type="number" id="bpz" step="0.1" placeholder="留空 = 每件自动推荐" style="width:150px">
+          </div>
+          <div class="fld">
+            <label>模芯余量 mm</label>
+            <input type="text" id="bmargin" value="20 20 20" style="width:110px">
+          </div>
+          <div class="fld">
+            <label>并发进程数</label>
+            <select id="bworkers">
+              <option value="" selected>自动</option>
+              <option value="1">1（串行对照）</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+          <div class="fld">
+            <label>选项</label>
+            <label class="hint"><input type="checkbox" id="bverify"> 做开模/顶出校验（每件慢几分钟）</label>
+            <label class="hint"><input type="checkbox" id="bcore" checked> 输出芯棒 + 四件套</label>
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button id="btnBatch">开始批量生成</button>
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button class="ghost" id="btnClear">清空列表</button>
+          </div>
+        </div>
+        <div class="bstat" id="bsys"><span class="hint">正在读取本机并发能力…</span></div>
+        <div class="bar" id="bbar"><i></i></div>
+        <div id="bout"></div>
       </div>
-      <div class="fld">
-        <label>旋转轴</label>
-        <select id="maxis">
-          <option value="">不旋转</option>
-          <option value="x">绕 X 轴</option>
-          <option value="y">绕 Y 轴</option>
-          <option value="z" selected>绕 Z 轴</option>
-        </select>
+    </section>
+
+    <!-- 4 倒圆缩小 -->
+    <section class="panel" id="p-corner">
+      <div class="card">
+        <h2><span class="n">4</span>倒圆缩小（倒圆半径 −2 mm，周长不变）</h2>
+
+        <!-- 数模选择：复用上传结果 up -->
+        <div class="file-info" id="cs_fileinfo"></div>
+        <div class="msg warn" id="cs_need" style="display:none">
+          请先在「上传数模」页上传数模。
+          <button class="ghost" id="cs_goto" type="button" style="margin-left:8px;padding:4px 10px">去上传</button>
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <div class="fld">
+            <label>倒圆半径缩小量（mm）</label>
+            <input type="number" id="cs_dr" value="2" step="0.1" min="0.1" style="width:120px">
+          </div>
+          <div class="fld">
+            <label>输出前缀</label>
+            <input type="text" id="cs_name" placeholder="上传后自动填充">
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button class="ghost" id="cs_btnAnalyze" type="button">先分析</button>
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button id="cs_btnRun" type="button">开始生成</button>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:8px">
+          建议先「先分析」确认倒圆位置与等截面性；生成后截面周长保持不变（容差 &lt; 0.001 mm），只把倒圆半径改小。
+        </div>
+
+        <div class="msg err" id="cs_err" style="display:none"></div>
+        <div id="cs_analysis" style="display:none"></div>
+        <div class="bar" id="cs_bar"><i></i></div>
+        <pre class="log" id="cs_log" style="display:none"></pre>
+        <div id="cs_out"></div>
       </div>
-      <div class="fld">
-        <label>方向</label>
-        <select id="mdir"><option value="cw">顺时针</option><option value="ccw">逆时针</option></select>
+    </section>
+
+    <!-- 5 镜像旋转 -->
+    <section class="panel" id="p-mirror">
+      <div class="card">
+        <h2><span class="n">5</span>镜像 / 旋转模型</h2>
+        <div class="row">
+          <div class="fld">
+            <label>镜像面</label>
+            <select id="mplane">
+              <option value="">不做镜像</option>
+              <option value="xOy" selected>xOy 面（Z 方向，上下翻）</option>
+              <option value="xOz">xOz 面（Y 方向）</option>
+              <option value="yOz">yOz 面（X 方向，左右翻）</option>
+            </select>
+          </div>
+          <div class="fld">
+            <label>旋转轴</label>
+            <select id="maxis">
+              <option value="">不旋转</option>
+              <option value="x">绕 X 轴</option>
+              <option value="y">绕 Y 轴</option>
+              <option value="z" selected>绕 Z 轴</option>
+            </select>
+          </div>
+          <div class="fld">
+            <label>方向</label>
+            <select id="mdir"><option value="cw">顺时针</option><option value="ccw">逆时针</option></select>
+          </div>
+          <div class="fld">
+            <label>角度 °</label>
+            <input type="number" id="mdeg" value="90" step="1" style="width:90px">
+          </div>
+          <div class="fld">
+            <label>镜像面过质心</label>
+            <select id="mcenter"><option value="1" selected>是</option><option value="0">否（过原点）</option></select>
+          </div>
+          <div class="fld">
+            <label>&nbsp;</label>
+            <button id="btnMirror">生成变换模型</button>
+          </div>
+        </div>
+        <div class="hint">镜像与旋转可同时选（先镜像后旋转）；结果是一个新 STEP，直接下载。</div>
+        <div id="mirOut"></div>
       </div>
-      <div class="fld">
-        <label>角度 °</label>
-        <input type="number" id="mdeg" value="90" step="1" style="width:90px">
-      </div>
-      <div class="fld">
-        <label>镜像面过质心</label>
-        <select id="mcenter"><option value="1" selected>是</option><option value="0">否（过原点）</option></select>
-      </div>
-      <div class="fld">
-        <label>&nbsp;</label>
-        <button id="btnMirror">生成变换模型</button>
-      </div>
-    </div>
-    <div class="hint">镜像与旋转可同时选（先镜像后旋转）；结果是一个新 STEP，直接下载。</div>
-    <div id="mirOut"></div>
-  </div>
+    </section>
+  </main>
 </div>
 
 <script>
@@ -281,6 +414,10 @@ async function upload(file) {
       + `管件编号：<b>${j.part_number}</b>`
       + (j.stl_note ? `<div class="hint" style="margin-top:6px">${j.stl_note}</div>` : '');
     info.style.display = 'block';
+    // 同步「倒圆缩小」面板：当前文件名 / 默认输出前缀
+    $('cs_name').value = j.part_number || '';
+    $('cs_name').placeholder = j.part_number || '';
+    syncCorner();
   } catch (e) {
     msg(box, 'err', '上传失败：' + e.message);
   } finally {
@@ -574,6 +711,208 @@ $('btnMirror').onclick = async () => {
     msg(box, 'err', '失败：' + e.message);
   } finally { b.disabled = false; b.textContent = '生成变换模型'; }
 };
+
+/* ---------------- 左侧导航 / 面板切换 ---------------- */
+const navItems = Array.from(document.querySelectorAll('.nav-item'));
+function showPanel(pid) {
+  navItems.forEach(b => b.classList.toggle('on', b.dataset.panel === pid));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === pid));
+  if (pid === 'p-corner') syncCorner();
+  window.scrollTo(0, 0);
+}
+navItems.forEach(b => { b.onclick = () => showPanel(b.dataset.panel); });
+
+/* ---------------- 倒圆缩小 ---------------- */
+// 同步「倒圆缩小」面板顶部的数模状态
+function syncCorner() {
+  const info = $('cs_fileinfo'), need = $('cs_need');
+  if (!info || !need) return;
+  if (!up) {
+    info.style.display = 'none';
+    info.innerHTML = '';
+    need.style.display = 'block';
+    return;
+  }
+  need.style.display = 'none';
+  info.style.display = 'block';
+  info.innerHTML = `当前数模：<b>${esc(up.original_name || up.file)}</b>`
+    + `　管件编号：<b>${esc(up.part_number || '-')}</b>`
+    + (up.size_mb != null ? `　${esc(up.size_mb)} MB` : '');
+}
+
+// 读取并校验倒圆半径缩小量，非法时给出 .msg.err 并返回 null
+function cornerDR() {
+  const errBox = $('cs_err');
+  errBox.style.display = 'none';
+  const raw = ($('cs_dr').value || '').trim();
+  if (raw === '') { msg(errBox, 'err', '请填写倒圆半径缩小量（mm）'); return null; }
+  const v = Number(raw);
+  if (!isFinite(v) || v <= 0) {
+    msg(errBox, 'err', '倒圆半径缩小量必须是大于 0 的数字（mm）');
+    return null;
+  }
+  return v;
+}
+
+// 分析结果摘要
+function renderCornerAnalysis(a) {
+  const box = $('cs_analysis');
+  const nC = Number(a.n_corners_outer || 0);
+  const radii = (a.corner_radii_outer || []).map(Number).filter(v => !isNaN(v));
+  const inner = (a.corner_radii_inner || []).map(Number).filter(v => !isNaN(v));
+  const prismatic = (a.prismatic === true) ? '是' : (a.prismatic === false ? '否' : '-');
+  const line = `外轮廓 <b>${fmt(a.n_edges_outer, 0)}</b> 条边 / 倒圆 <b>${nC}</b> 处`
+    + (radii.length ? `（R = ${radii.map(v => fmt(v, 3)).join(', ')} mm）` : '')
+    + `｜段长 <b>${fmt(a.length_mm, 1)}</b> mm`
+    + `｜截面周长 <b>${fmt(a.perimeter_mm, 2)}</b> mm`
+    + `｜是否等截面：<b>${prismatic}</b>`;
+  const detail = `<div class="hint" style="margin-top:4px">倒圆判定阈值 ${fmt(a.corner_threshold_mm, 3)} mm`
+    + `　周长波动 ${fmt(a.perimeter_var_pct, 3)} %　中心漂移 ${fmt(a.center_drift_mm, 3)} mm`
+    + (inner.length ? `　内轮廓倒圆 R = ${inner.map(v => fmt(v, 3)).join(', ')} mm` : '')
+    + '</div>';
+  if (!nC) {
+    msg(box, 'warn', '本件没有明显倒圆，跳过。' + detail
+      + '<div class="hint">请确认倒圆半径大于判定阈值，或换一个带倒圆的数模。</div>');
+    return;
+  }
+  if (a.prismatic === false) {
+    msg(box, 'warn', line + detail
+      + '<div style="margin-top:4px">不是等截面：无法在保持截面周长不变的前提下倒圆缩小，'
+      + '后端会拒绝生成或只给出近似结果。</div>');
+    return;
+  }
+  msg(box, 'ok', line + detail);
+}
+
+// 生成结果：表格式摘要 + 下载按钮
+function renderCornerResult(res, taskElapsed) {
+  const before = (res.corner_radii_before_mm || []).map(Number).filter(v => !isNaN(v));
+  const after = (res.corner_radii_after_mm || []).map(Number).filter(v => !isNaN(v));
+  const pb = Number(res.perimeter_before_mm), pa = Number(res.perimeter_after_mm);
+  const vb = Number(res.volume_before_mm3), va = Number(res.volume_after_mm3);
+  const dP = pa - pb;
+  const pOk = isFinite(dP) && Math.abs(dP) < 0.001;
+  const vPct = (res.volume_change_pct != null)
+    ? Number(res.volume_change_pct)
+    : ((isFinite(vb) && vb) ? (va - vb) / vb * 100 : NaN);
+  const dR = (before.length && before.length === after.length)
+    ? before.map((v, i) => after[i] - v) : [];
+  const radiiCell = (arr) => arr.length ? arr.map(v => fmt(v, 3)).join(', ') + ' mm' : '-';
+  const dRCell = dR.length
+    ? dR.map(v => (v > 0 ? '+' : '') + fmt(v, 3)).join(', ') + ' mm'
+    : '-';
+  const pCell = isFinite(dP)
+    ? `<span style="color:${pOk ? 'var(--ok)' : 'var(--err)'}">Δ ${fmt(dP, 4)} mm`
+      + `（容差 &lt; 0.001 mm，${pOk ? '通过' : '超差'}）</span>`
+    : '-';
+  const elapsed = (res.elapsed_s != null) ? res.elapsed_s : taskElapsed;
+  const name = res.name || '倒圆缩小结果';
+
+  let html = `<div class="msg ok">生成完成：<b>${esc(name)}</b>，用时 <b>${fmt(elapsed, 1)}</b> s</div>`
+    + '<table class="tbl"><thead><tr><th>项目</th><th>改前</th><th>改后</th><th>变化</th></tr></thead><tbody>'
+    + `<tr><td>倒圆半径 R</td><td>${radiiCell(before)}</td><td>${radiiCell(after)}</td><td>${dRCell}</td></tr>`
+    + `<tr><td>截面周长</td><td>${isFinite(pb) ? fmt(pb, 4) + ' mm' : '-'}</td>`
+    + `<td>${isFinite(pa) ? fmt(pa, 4) + ' mm' : '-'}</td><td>${pCell}</td></tr>`
+    + `<tr><td>体积</td><td>${isFinite(vb) ? fmt(vb / 1000, 2) + ' cm³' : '-'}</td>`
+    + `<td>${isFinite(va) ? fmt(va / 1000, 2) + ' cm³' : '-'}</td>`
+    + `<td>${isFinite(vPct) ? fmt(vPct, 3) + ' %' : '-'}</td></tr>`
+    + `<tr><td>用时</td><td colspan="3">${fmt(elapsed, 1)} s</td></tr>`
+    + '</tbody></table>';
+
+  if (res.url) {
+    html += '<div class="files"><div class="f">'
+      + '<div class="t">倒圆缩小 STEP</div>'
+      + `<div class="d">${esc(name)} · ${fmt(res.size_mb, 2)} MB</div>`
+      + `<a href="${esc(res.url)}">下载 STEP（${fmt(res.size_mb, 2)} MB）</a>`
+      + '</div></div>';
+  } else {
+    html += '<div class="msg warn">后端未返回下载链接，请查看上方日志。</div>';
+  }
+  $('cs_out').innerHTML = html;
+}
+
+// 跳转到上传页
+$('cs_goto').onclick = () => showPanel('p-upload');
+
+// 先分析：POST /api/corner_analyze → 轮询 → 渲染摘要
+$('cs_btnAnalyze').onclick = async () => {
+  $('cs_err').style.display = 'none';
+  const box = $('cs_analysis');
+  box.className = '';
+  box.style.display = 'none';
+  if (!up) { msg($('cs_err'), 'err', '请先在「上传数模」页上传数模'); return; }
+  const dR = cornerDR();
+  if (dR === null) return;
+
+  const b = $('cs_btnAnalyze'); b.disabled = true; b.textContent = '分析中…';
+  $('cs_out').innerHTML = '';
+  const bar = $('cs_bar'), log = $('cs_log');
+  bar.style.display = 'block';
+  log.style.display = 'none';
+  log.textContent = '';
+  try {
+    const r = await fetch('/api/corner_analyze', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: up.file, dR })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '分析启动失败');
+    const t = await pollLog(j.task_id, log, bar);
+    const res = t.result || {};
+    if (t.state === 'error') {
+      msg(box, 'err', '分析失败：' + esc(res.error || t.error || '未知错误'));
+      return;
+    }
+    renderCornerAnalysis(res.analysis || {});
+  } catch (e) {
+    msg(box, 'err', '分析失败：' + esc(e.message));
+  } finally {
+    b.disabled = false; b.textContent = '先分析';
+    bar.style.display = 'none';
+  }
+};
+
+// 开始生成：POST /api/corner_shrink → 轮询 → 渲染摘要与下载
+$('cs_btnRun').onclick = async () => {
+  $('cs_err').style.display = 'none';
+  if (!up) { msg($('cs_err'), 'err', '请先在「上传数模」页上传数模'); return; }
+  const dR = cornerDR();
+  if (dR === null) return;
+  const prefix = ($('cs_name').value || '').trim();
+  if (!prefix) { msg($('cs_err'), 'err', '请填写输出前缀（默认 = 管件编号）'); return; }
+
+  const b = $('cs_btnRun'); b.disabled = true; b.textContent = '生成中…';
+  const box = $('cs_out');
+  box.className = '';
+  box.innerHTML = '';
+  const bar = $('cs_bar'), log = $('cs_log');
+  bar.style.display = 'block';
+  log.style.display = 'none';
+  log.textContent = '';
+  try {
+    const r = await fetch('/api/corner_shrink', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: up.file, dR, prefix })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '启动失败');
+    const t = await pollLog(j.task_id, log, bar);
+    const res = t.result || {};
+    if (t.state === 'error' || res.ok === false) {
+      msg(box, 'err', '生成失败：' + esc(res.error || t.error || '未知错误'));
+      return;
+    }
+    renderCornerResult(res, t.elapsed_s);
+  } catch (e) {
+    msg(box, 'err', '生成失败：' + esc(e.message));
+  } finally {
+    b.disabled = false; b.textContent = '开始生成';
+    bar.style.display = 'none';
+  }
+};
+
+// 首次加载时同步一次「倒圆缩小」面板状态
+syncCorner();
 </script>
 </body>
 </html>
