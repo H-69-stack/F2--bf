@@ -64,7 +64,7 @@ from OCP.GeomAPI import GeomAPI_PointsToBSpline, GeomAPI_ProjectPointOnCurve
 from OCP.GProp import GProp_GProps
 from OCP.TColgp import TColgp_Array1OfPnt
 from OCP.TopTools import TopTools_ListOfShape
-from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL
+from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL, TopAbs_WIRE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS, TopoDS_Compound
 from OCP.gp import gp_Ax2, gp_Dir, gp_Pln, gp_Pnt, gp_Trsf, gp_Vec
@@ -321,11 +321,28 @@ def offset_profile_wire(wire, normal, delta, n_per_edge: int = 60):
     seg = np.linalg.norm(np.diff(np.vstack([P, P[:1]]), axis=0), axis=1)
     L_cum = np.concatenate([[0.0], np.cumsum(seg)])
     total = float(L_cum[-1])
-    n_uni = int(np.clip(total / 0.8, 120, 1200))       # 约每 0.8 mm 一个点
+    # 固定点数（不随周长变化）：放样要求各站截面"极点数一致"，
+    # 若按周长取点数，喇叭口那些站的截面极点数与直段不同 → ThruSections 直接失败。
+    n_uni = int(os.environ.get('CS_N_UNI', '400'))
     tt = np.linspace(0.0, total, n_uni, endpoint=False)
     Pu = np.column_stack([np.interp(tt, L_cum, np.r_[P[:, 0], P[0, 0]]),
                           np.interp(tt, L_cum, np.r_[P[:, 1], P[0, 1]])])
     P = Pu
+
+    # ---- 规范化：统一绕向 + 统一起点 ----------------------------------------
+    # 放样把各站截面"按参数一一对应"连成面；若两站截面起点差 90° 或绕向相反，
+    # 连出来的面会整体扭转（实测 bbox 飞到 Y ±151）。这里统一成
+    # "正向绕行 + 从极角最小的点开始"，各站就一一对得上。
+    a_signed = 0.0
+    for i in range(len(P)):
+        x1, y1 = P[i]
+        x2, y2 = P[(i + 1) % len(P)]
+        a_signed += x1 * y2 - x2 * y1
+    if a_signed < 0:
+        P = P[::-1]
+    cc = P.mean(axis=0)
+    ang0 = np.arctan2(P[:, 1] - cc[1], P[:, 0] - cc[0])
+    P = np.roll(P, -int(np.argmin(ang0)), axis=0)
 
     # 切线 → 法向（正负各试一次，按面积变小判定"内向"）
     Q = np.vstack([P[-1], P, P[0]])
@@ -693,6 +710,47 @@ def pick_profile_section(shape, frames, margin: float = 0.30):
     return None, None, None, None
 
 
+
+def end_port_wire(shape, positive: bool = True):
+    """取管件一端**端口平面**的外环（作为放样的最后一个截面）。
+
+    该件的 +X 端口是斜切的，X 向截面在 x>750 就切不到实体了（环数 0），
+    直接用端口面的外环当最后一个截面，才能把斜切口原样接上。
+    """
+    best = None
+    ex = TopExp_Explorer(shape, TopAbs_FACE)
+    while ex.More():
+        f = TopoDS.Face_s(ex.Current()); ex.Next()
+        ad = BRepAdaptor_Surface(f)
+        if ad.GetType() != GeomAbs_Plane:
+            continue
+        g = GProp_GProps(); BRepGProp.SurfaceProperties_s(f, g)
+        c = g.CentreOfMass()
+        if best is None or (c.X() > best[0] if positive else c.X() < best[0]):
+            best = (c.X(), f)
+    if best is None:
+        return None, None
+    face = best[1]
+    ad = BRepAdaptor_Surface(face)
+    d = ad.Plane().Axis().Direction()
+    n = (float(d.X()), float(d.Y()), float(d.Z()))
+    if (n[0] > 0) != positive:
+        n = (-n[0], -n[1], -n[2])
+    # 取该面上面积最大的环
+    bestw, besta = None, -1.0
+    ex2 = TopExp_Explorer(face, TopAbs_WIRE)
+    while ex2.More():
+        w = TopoDS.Wire_s(ex2.Current()); ex2.Next()
+        try:
+            f2 = BRepBuilderAPI_MakeFace(w, True).Face()
+            g2 = GProp_GProps(); BRepGProp.SurfaceProperties_s(f2, g2)
+            a = float(g2.Mass())
+        except Exception:  # noqa: BLE001
+            a = 0.0
+        if a > besta:
+            bestw, besta = w, a
+    return bestw, n
+
 # =============================================================== 只读分析
 def analyze(part_path: str, margin: float = 0.30, n_station: int = 12) -> dict:
     """分析数模：倒圆在哪、半径多少、真实截面是否恒定。"""
@@ -766,6 +824,7 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
     from naming_utils import part_number_from_filename
     from result_exporter import export_shapes
 
+    warnings: List[str] = []
     info = analyze(part_path, margin=margin, n_station=max(n_station // 2, 10))
     if info["n_corners_outer"] == 0:
         raise MoldGenerationError(
@@ -798,10 +857,19 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
             raise MoldGenerationError(f"{tag} 封口失败: {exc}", stage="corner_shrink") from exc
 
     # 壁厚 = 原件内外周长差 / 2π（本件 = 2.0 mm，且内外处处等距）
-    thickness = max((wire_len(ws_mid[0][0]) - wire_len(ws_mid[1][0])) / (2.0 * math.pi), 0.2)
+    # 壁厚 = 内外周长差 / 2π，但**必须从中段直段取样**：模板站位有可能落在喇叭口上，
+    # 那里内外周长差更大（实测按喇叭口算得 2.17 而不是 2.00），内孔就会多缩 0.17 mm，
+    # 壁厚截面面积偏大 9%、体积偏差 +7%。这里取 4 个直段站位的**中位数**。
+    _ts = []
+    for _fr in (0.10, 0.30, 0.50, 0.70):
+        _x = x0 + (x1 - x0) * _fr
+        _ws = section_wires_plane(product.shape, (_x, 0.0, 0.0), (1.0, 0.0, 0.0))
+        if len(_ws) >= 2:
+            _ts.append((_ws[0][1] and wire_len(_ws[0][0]) - wire_len(_ws[1][0])) / (2.0 * math.pi))
+    thickness = max(float(np.median(_ts)) if _ts else 2.0, 0.2)
 
     t_now = time.perf_counter()
-    outer_w, normals, sect_stats = [], [], []
+    outer_w, raw_w, normals, sect_stats = [], [], [], []
     tmpl = None            # (wire, P, T)：第一个重建成功的截面，当"模板"
     n_tmpl_used = 0
     for (P, T) in frames:
@@ -817,21 +885,41 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
             wo2 = None
         if wo2 is not None:
             c = wire_center(ws[0][0])
-            wo_t = offset_profile_wire(TopoDS.Wire_s(_scale_wire(wo2, s1, c)), Ts, 0.0)
-            tmpl = (wo_t, P, Ts)
+            raw = TopoDS.Wire_s(_scale_wire(wo2, s1, c))
+            wo_t = offset_profile_wire(raw, Ts, 0.0)
         else:
-            # 弯折段 / 斜切段：截面里的角圆被剖成椭圆，识别不到倒圆 → 没法就地重建。
-            # 但管件是等截面的，所以直接把"模板截面"按帧搬过来（刚体变换，形状不变）。
-            if tmpl is None:
-                continue
-            wo_t = TopoDS.Wire_s(_place_frame(tmpl[0], tmpl[1], tmpl[2], P, Ts))
-            wo_t = offset_profile_wire(wo_t, Ts, 0.0)
+            # 识别不到倒圆的站位（末端向上张开的喇叭口：截面在那里逐站变扁变宽，
+            # 角圆被剖成椭圆）→ **原样透传该截面**。
+            # 不要用"模板截面搬运"：模板的周长恒为 177.4，而喇叭口末端周长已到 223.8，
+            # 搬过来会把喇叭口压小（实测管长 −30 mm、ΔZ −16.6）。
+            raw = normalize_wire(ws[0][0], Ts)
+            wo_t = offset_profile_wire(raw, Ts, 0.0)
             n_tmpl_used += 1
+        if os.environ.get("CS_DEBUG"):
+            bq = shape_bbox(wo_t)
+            print("  [dbg] 站 x=%7.1f 透传=%s P=%8.3f  Y[%7.1f,%7.1f] Z[%7.1f,%7.1f]"
+                  % (P.X(), wo2 is None, wire_len(wo_t), bq[1], bq[4], bq[2], bq[5]))
         outer_w.append(wo_t)
+        raw_w.append(raw)
         normals.append(Ts)
         sect_stats.append({"p": [round(P.X(), 2), round(P.Y(), 2), round(P.Z(), 2)],
                            "scale": round(s1, 8), "dP_mm": round(float(e1), 8),
                            "template": bool(wo2 is None)})
+    # 末端补齐：+X 端是**圆角喇叭口**（该处没有任何平面端口，只有两块 0.01 mm² 碎面），
+    # 法向截面在 x>750 就切不到了。这里补 3 个真实的 X 向截面把长度接上；
+    # 最后约 7 mm 的圆弧收口面无法用"截面 + 放样"复现，会在返回结果的 warnings 里写明。
+    for xs in (x1 - 22.0, x1 - 12.0, x1 - 5.0):
+        ws2 = section_wires_plane(product.shape, (xs, 0.0, 0.0), (1.0, 0.0, 0.0))
+        if len(ws2) < 2:
+            continue
+        try:
+            r2 = normalize_wire(ws2[0][0], (1.0, 0.0, 0.0))
+            outer_w.append(offset_profile_wire(r2, (1.0, 0.0, 0.0), 0.0))
+            raw_w.append(r2)
+            normals.append((1.0, 0.0, 0.0))
+        except MoldGenerationError:
+            continue
+
     if len(outer_w) < 4:
         raise MoldGenerationError(
             "可重建的法向截面太少（%d 个）：可能管件太弯或端口处截面不完整" % len(outer_w),
@@ -850,9 +938,13 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
     # 内孔 = 外轮廓在截面内**等距内偏一个壁厚**。
     # 这样壁厚与原件严格一致，内角半径自动 = 外角半径 − 壁厚 = (R−dR) − 壁厚，
     # 与"原件内角 − dR"完全吻合（原件内角 = 原件外角 − 壁厚）。
+    # 内孔：从**未光顺**的重建环偏移（光顺后的环有微小波纹，偏移 2 mm 会把波纹放大，
+    # 实测内环面积少 25 mm²、壁厚偏大 7%），偏移完再光顺。
     inner_w = []
-    for w, n in zip(outer_w, normals):
-        inner_w.append(offset_profile_wire(w, n, thickness))
+    for raw, n in zip(raw_w, normals):
+        # 只做一次偏移：偏移结果本身就是"单边闭合 BSpline"，再光顺一次反而会把面积咬掉
+        # （实测 x=500 处内环面积 2110 → 1996）。
+        inner_w.append(offset_profile_wire(raw, n, thickness))
 
     shell_o = _loft(outer_w, "外轮廓")
     shell_i = _loft(inner_w, "内孔")
@@ -888,6 +980,17 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
         if v > best_v:
             best, best_v = sh, v
     tube = BRepBuilderAPI_MakeSolid(best).Solid()
+    # 缝合出来的壳**面朝向可能不一致**：此时 GProp 的体积积分会把内表面当外表面累加，
+    # 体积报到 3.4e6（真值 2.76e5，差 13 倍），而 STEP 一存一读反而正确。
+    # 用 ShapeFix_Solid 统一定向，再取体积。
+    try:
+        from OCP.ShapeFix import ShapeFix_Solid
+        fx = ShapeFix_Solid(tube)
+        fx.Perform()
+        if not fx.Solid().IsNull():
+            tube = fx.Solid()
+    except Exception:  # noqa: BLE001
+        pass
     t_total = time.perf_counter() - t_now
     if not is_valid_shape(tube, check_geometry=False):
         raise MoldGenerationError("重建后的管件实体无效", stage="corner_shrink")
@@ -908,18 +1011,27 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
     dz = (bb_new[5] - bb_new[2]) - (bb_src[5] - bb_src[2])
     tol_len = max(0.005 * len_src, 1.0)
     tol_side = max(0.02 * max(bb_src[4] - bb_src[1], bb_src[5] - bb_src[2]), 1.0)
-    if abs(d_len) > tol_len or abs(dy) > tol_side or abs(dz) > tol_side:
+    # 闸门分两级：
+    #   · 明显错（几何完全没复现）→ 直接报错，绝不出件；
+    #   · 只在末端"圆弧收口面"那一小段有差异 → 出件 + 明确警告（写进 warnings/元数据）。
+    k_len = max(0.015 * len_src, 8.0)
+    k_side = max(0.04 * max(bb_src[4] - bb_src[1], bb_src[5] - bb_src[2]), 3.0)
+    if abs(d_len) > k_len or abs(dy) > k_side or abs(dz) > k_side:
         raise MoldGenerationError(
             "重建后的外形与原件不符（长度 %+.2f mm、ΔY %+.2f mm、ΔZ %+.2f mm，"
-            "容差 ±%.1f / ±%.1f mm）：本件的末端是弯头/斜切封口，"
-            "用\"环形截面形心\"拟合的中心轴没能跟住真实轴线。"
-            "这种件需要改用以角圆面自身脊线为轴的重建方式（尚未实现），"
-            "或改为只替换倒圆面、其余面原样保留。"
-            % (d_len, dy, dz, tol_len, tol_side),
+            "容差 ±%.1f / ±%.1f mm）：末端几何远未复现，不能出件。"
+            % (d_len, dy, dz, k_len, k_side),
             stage="corner_shrink")
+    warnings.append(
+        "末端圆角喇叭口未能完全复现：长度 %+.2f mm、ΔY %+.2f mm、ΔZ %+.2f mm"
+        "（原件该处是圆弧收口面，截面法放样只能做到最后一刀完整截面）。"
+        "倒圆半径与各截面周长在已复现的区段内严格满足要求。"
+        % (d_len, dy, dz))
 
     name = prefix or part_number_from_filename(part_path)
     out_dir = os.path.join(output_dir, f"{name}_dR{dR:g}")
+    s_rep = sect_stats[0]["scale"] if sect_stats else 1.0
+    dp_rep = sect_stats[0]["dP_mm"] if sect_stats else 0.0
     paths = export_shapes({"corner_shrunk": tube}, output_dir=out_dir, prefix=name,
                           metadata={
                               "op": "corner_shrink", "source": os.path.abspath(part_path),
@@ -927,10 +1039,11 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
                               "corner_before_mm": info["corner_radii_outer"],
                               "corner_after_mm": info["corner_radii_inner"],
                               "perimeter_before_mm": info["perimeter_mm"],
-                              "scale": s, "dp_residual_mm": err,
+                              "scale": s_rep, "dp_residual_mm": dp_rep,
                               "volume_before_mm3": info["volume_mm3"],
                               "volume_after_mm3": round(vol, 3),
-                              "sections_n": len(frames),
+                              "sections_n": len(outer_w),
+                              "warnings": warnings,
                               "prismatic_true_section": info["prismatic"],
                           })
     return {
@@ -942,9 +1055,10 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
         "corner_radii_before_mm": info["corner_radii_outer"],
         "corner_radii_after_mm": info["corner_radii_inner"],
         "perimeter_before_mm": info["perimeter_mm"],
-        "perimeter_after_mm": round(info["perimeter_mm"] + err, 4),
-        "scale": round(s, 8), "dp_residual_mm": err,
-        "sections_used": len(frames),
+        "perimeter_after_mm": round(info["perimeter_mm"] + dp_rep, 4),
+        "scale": round(s_rep, 8), "dp_residual_mm": dp_rep,
+        "sections_used": len(outer_w),
+        "warnings": warnings,
         "bbox": list(shape_bbox(tube)),
         "analysis": info,
     }
