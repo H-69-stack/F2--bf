@@ -275,6 +275,113 @@ def _scale_wire(wire, s: float, center):
     return BRepBuilderAPI_Transform(wire, tr, True, False).Shape()
 
 
+def offset_profile_wire(wire, normal, delta, n_per_edge: int = 60):
+    """把闭合截面环**在平面内**沿内向法向偏移 delta，返回一条单边闭合 BSpline wire。
+
+    为什么不用 OCC 的偏移/抽壳：本件上 `BRepOffsetAPI_MakeOffset`（wire 级）、
+    `MakeThickSolid`（3D 抽壳）、`MakePipeShell`、`ThruSections`（多边内孔）全都失败。
+    这里走最简单的路子：
+      1. 把环按弧长重采样成密点（保序、保向）；
+      2. 每个点沿"内向法向"平移 delta（内向 = 切线左法向，因为 normalize_wire 已把环
+         统一成正向/CCW，材料在左）；
+      3. 用一条**周期 B 样条**穿过偏移后的点 → 单边闭合 wire。
+    单边 wire 让 ThruSections 不存在"逐边对应"的问题。
+    """
+    u, v, _n = _frame_axes(normal)
+    O = wire_center(wire)
+    Oarr = np.array([O.X(), O.Y(), O.Z()])
+
+    pts2 = []          # 平面内 (u, v) 点列（**按遍历方向**，rev 边要反着取）
+    for it in edge_items(wire):
+        a0, a1 = it["lo"], it["hi"]
+        if it["rev"]:
+            a0, a1 = a1, a0
+        n = max(4, n_per_edge)
+        for j in range(n):
+            t = a0 + (a1 - a0) * (j / n)
+            p = it["curve"].Value(t)
+            d = np.array([p.X(), p.Y(), p.Z()]) - Oarr
+            pts2.append((float(np.dot(d, u)), float(np.dot(d, v))))
+    if len(pts2) < 8:
+        raise MoldGenerationError("截面采样点太少", stage="corner_shrink")
+
+    P = np.array(pts2, dtype=float)
+    # 去重（相邻点过近）
+    keep = [0]
+    for i in range(1, len(P)):
+        if np.linalg.norm(P[i] - P[keep[-1]]) > 1e-4:
+            keep.append(i)
+    P = P[keep]
+    if np.linalg.norm(P[0] - P[-1]) < 1e-3:
+        P = P[:-1]
+
+    # ---- 按弧长**均匀重采样** -------------------------------------------------
+    # 周期三次插值对参数间距极其敏感：各边采样密度不一致（短边 60 点、长边 60 点）
+    # 会在角处产生明显外凸（实测偏移后周长反而 +26~+32 mm）。均匀化后过冲消失。
+    seg = np.linalg.norm(np.diff(np.vstack([P, P[:1]]), axis=0), axis=1)
+    L_cum = np.concatenate([[0.0], np.cumsum(seg)])
+    total = float(L_cum[-1])
+    n_uni = int(np.clip(total / 0.8, 120, 1200))       # 约每 0.8 mm 一个点
+    tt = np.linspace(0.0, total, n_uni, endpoint=False)
+    Pu = np.column_stack([np.interp(tt, L_cum, np.r_[P[:, 0], P[0, 0]]),
+                          np.interp(tt, L_cum, np.r_[P[:, 1], P[0, 1]])])
+    P = Pu
+
+    # 切线 → 法向（正负各试一次，按面积变小判定"内向"）
+    Q = np.vstack([P[-1], P, P[0]])
+    T = Q[2:] - Q[:-2]
+    L = np.linalg.norm(T, axis=1)
+    L[L < 1e-9] = 1e-9
+    T = T / L[:, None]
+    N1 = np.column_stack([-T[:, 1], T[:, 0]])
+
+    from OCP.GeomAPI import GeomAPI_Interpolate
+    from OCP.TColgp import TColgp_HArray1OfPnt
+
+    def _build(sign):
+        Poff = P + sign * delta * N1
+        p3 = [gp_Pnt(*(Oarr + a * u + b * v)) for a, b in Poff]
+        arr = TColgp_HArray1OfPnt(1, len(p3))
+        for i, q in enumerate(p3, 1):
+            arr.SetValue(i, q)
+        interp = GeomAPI_Interpolate(arr, True, 1e-6)      # True = 周期闭合
+        interp.Perform()
+        if not interp.IsDone():
+            return None
+        curve = interp.Curve()
+        edge = BRepBuilderAPI_MakeEdge(curve).Edge()
+        mw = BRepBuilderAPI_MakeWire()
+        mw.Add(edge)
+        if not mw.IsDone():
+            return None
+        return TopoDS.Wire_s(mw.Wire())
+
+    # 判据用**周长变短**（不是面积）：偏移后的环是"单边闭合 BSpline"，
+    # 用 _signed_area 那套每边取 6 点只会在整条环上取 6 点，面积完全失真。
+    p0 = wire_len(wire)
+    if abs(delta) <= 1e-9:                      # delta=0：只做"光顺成单边闭合 BSpline"
+        w = _build(0.0)
+        if w is None:
+            raise MoldGenerationError("截面光顺失败", stage="corner_shrink")
+        return w
+    for sign in (1.0, -1.0):
+        w = _build(sign)
+        if w is None:
+            continue
+        if wire_len(w) < p0 - 1.0:                 # 周长变短 = 向内 ✓
+            return w
+    raise MoldGenerationError("内孔截面向内偏移失败", stage="corner_shrink")
+
+
+def _poly_area(P):
+    a = 0.0
+    for i in range(len(P)):
+        x1, y1 = P[i]
+        x2, y2 = P[(i + 1) % len(P)]
+        a += x1 * y2 - x2 * y1
+    return abs(0.5 * a)
+
+
 def _signed_area(wire, normal):
     """截面环在法向平面内的有向面积（用来判断"向内/向外"）。"""
     u, v, _n = _frame_axes(normal)
@@ -695,24 +802,36 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
 
     t_now = time.perf_counter()
     outer_w, normals, sect_stats = [], [], []
+    tmpl = None            # (wire, P, T)：第一个重建成功的截面，当"模板"
+    n_tmpl_used = 0
     for (P, T) in frames:
         Ts = _snap_axis(T)
         ws = section_wires_plane(product.shape, (P.X(), P.Y(), P.Z()), Ts)
         if len(ws) < 2:
             continue
         fr = plane_basis((P.X(), P.Y(), P.Z()), Ts)
+        wo2, s1, e1 = None, 0.0, 0.0
         try:
             wo2, s1, e1 = solve_section(ws[0][0], dR, r_thr, fr)
         except MoldGenerationError:
-            continue
-        if wo2 is None:
-            continue
-        c = wire_center(ws[0][0])
-        wo_f = TopoDS.Wire_s(_scale_wire(wo2, s1, c))
-        outer_w.append(normalize_wire(wo_f, Ts))
+            wo2 = None
+        if wo2 is not None:
+            c = wire_center(ws[0][0])
+            wo_t = offset_profile_wire(TopoDS.Wire_s(_scale_wire(wo2, s1, c)), Ts, 0.0)
+            tmpl = (wo_t, P, Ts)
+        else:
+            # 弯折段 / 斜切段：截面里的角圆被剖成椭圆，识别不到倒圆 → 没法就地重建。
+            # 但管件是等截面的，所以直接把"模板截面"按帧搬过来（刚体变换，形状不变）。
+            if tmpl is None:
+                continue
+            wo_t = TopoDS.Wire_s(_place_frame(tmpl[0], tmpl[1], tmpl[2], P, Ts))
+            wo_t = offset_profile_wire(wo_t, Ts, 0.0)
+            n_tmpl_used += 1
+        outer_w.append(wo_t)
         normals.append(Ts)
         sect_stats.append({"p": [round(P.X(), 2), round(P.Y(), 2), round(P.Z(), 2)],
-                           "scale": round(s1, 8), "dP_mm": round(float(e1), 8)})
+                           "scale": round(s1, 8), "dP_mm": round(float(e1), 8),
+                           "template": bool(wo2 is None)})
     if len(outer_w) < 4:
         raise MoldGenerationError(
             "可重建的法向截面太少（%d 个）：可能管件太弯或端口处截面不完整" % len(outer_w),
@@ -733,7 +852,7 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
     # 与"原件内角 − dR"完全吻合（原件内角 = 原件外角 − 壁厚）。
     inner_w = []
     for w, n in zip(outer_w, normals):
-        inner_w.append(_offset_wire_in_plane(w, n, -thickness))
+        inner_w.append(offset_profile_wire(w, n, thickness))
 
     shell_o = _loft(outer_w, "外轮廓")
     shell_i = _loft(inner_w, "内孔")
@@ -745,6 +864,15 @@ def shrink(part_path: str, dR: float = 2.0, output_dir: str = "./output",
         sew.Add(s_)
     sew.Perform()
     sewn = sew.SewedShape()
+    if os.environ.get("CS_DEBUG"):
+        for nm, sh in (("shell_o", shell_o), ("shell_i", shell_i),
+                       ("cap0", cap0), ("cap1", cap1), ("sewn", sewn)):
+            try:
+                b = shape_bbox(sh)
+                print("  [dbg] %-8s X[%.1f,%.1f] Y[%.1f,%.1f] Z[%.1f,%.1f]"
+                      % (nm, b[0], b[3], b[1], b[4], b[2], b[5]))
+            except Exception as exc:
+                print("  [dbg] %-8s 无法量测: %s" % (nm, exc))
     shells = []
     ex = TopExp_Explorer(sewn, TopAbs_SHELL)
     while ex.More():
